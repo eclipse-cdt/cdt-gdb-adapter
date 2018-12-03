@@ -10,8 +10,8 @@
 import { spawn } from 'child_process';
 import * as events from 'events';
 import { Writable } from 'stream';
-import { logger } from 'vscode-debugadapter/lib/logger';
 import { AttachRequestArguments, LaunchRequestArguments } from './GDBDebugSession';
+import { logger } from './logging';
 import { MIParser } from './MIParser';
 
 export interface MIResponse {
@@ -62,7 +62,7 @@ export class GDBBackend extends events.EventEmitter {
 
     public sendCommand<T>(command: string): Promise<T> {
         const token = this.nextToken();
-        logger.verbose(`GDB command: ${token} ${command}`);
+        logger.debug('GDB command', token, command);
         return new Promise<T>((resolve, reject) => {
             if (this.out) {
                 this.parser.queueCommand(token, (result) => {

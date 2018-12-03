@@ -11,6 +11,7 @@
       "elements"
     ],
     "interface-name": false,
+    "member-ordering": false,
     "no-empty-interface": false,
     "object-literal-sort-keys": false,
     "quotemark": [

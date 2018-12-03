@@ -8,13 +8,13 @@
  * SPDX-License-Identifier: EPL-2.0
  *********************************************************************/
 import * as path from 'path';
-import { logger } from 'vscode-debugadapter/lib/logger';
 import {
-    Handles, InitializedEvent, Logger, LoggingDebugSession, OutputEvent, Scope, Source, StackFrame,
-    StoppedEvent, TerminatedEvent, Thread,
+    DebugSession, Handles, InitializedEvent, OutputEvent, Scope, Source,
+    StackFrame, StoppedEvent, TerminatedEvent, Thread,
 } from 'vscode-debugadapter/lib/main';
 import { DebugProtocol } from 'vscode-debugprotocol/lib/debugProtocol';
 import { GDBBackend } from './GDBBackend';
+import { addLogFile, logger } from './logging';
 import { sendBreakDelete, sendBreakInsert, sendBreakList } from './mi/breakpoint';
 import * as exec from './mi/exec';
 import { sendStackInfoDepth, sendStackListFramesRequest, sendStackListVariables } from './mi/stack';
@@ -23,19 +23,21 @@ import { sendThreadInfoRequest } from './mi/thread';
 import { sendVarAssign, sendVarCreate, sendVarDelete, sendVarListChildren, sendVarUpdate } from './mi/var';
 import * as varMgr from './varManager';
 
-export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
+export interface LoggingRequestArguments {
+    logFile?: string;
+}
+
+export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments, LoggingRequestArguments {
     gdb?: string;
     program: string;
     arguments?: string;
     target: string;
-    verbose?: boolean;
 }
 
-export interface AttachRequestArguments extends DebugProtocol.LaunchRequestArguments {
+export interface AttachRequestArguments extends DebugProtocol.LaunchRequestArguments, LoggingRequestArguments {
     gdb?: string;
     program: string;
     processId: string;
-    verbose?: boolean;
 }
 
 export interface FrameReference {
@@ -56,19 +58,43 @@ export interface ObjectVariableReference {
 
 export type VariableReference = FrameVariableReference | ObjectVariableReference;
 
-export class GDBDebugSession extends LoggingDebugSession {
+export class GDBDebugSession extends DebugSession {
     private gdb: GDBBackend = new GDBBackend();
     private isAttach = false;
     private isRunning = false;
     private frameHandles = new Handles<FrameReference>();
     private variableHandles = new Handles<VariableReference>();
 
-    constructor() {
-        super('gdb-debug.log');
+    // Override some DebugSession methods to add logging.
+    public sendEvent(event: DebugProtocol.Event): void {
+        logger.debug('adapter --> client', event);
+        super.sendEvent(event);
+    }
+
+    public sendRequest(command: string, args: any, timeout: number,
+        cb: (response: DebugProtocol.Response) => void): void {
+        logger.debug('adapter --> client', command, args);
+        super.sendRequest(command, args, timeout, cb);
+    }
+
+    public sendResponse(response: DebugProtocol.Response): void {
+        logger.debug('adapter --> client', response);
+        super.sendResponse(response);
+    }
+
+    protected dispatchRequest(request: DebugProtocol.Request): void {
+        logger.debug('client --> adapter', request);
+        super.dispatchRequest(request);
+    }
+
+    private setupLogging(args: LoggingRequestArguments): void {
+        if (args.logFile) {
+            addLogFile(args.logFile);
+        }
     }
 
     protected initializeRequest(response: DebugProtocol.InitializeResponse,
-                                args: DebugProtocol.InitializeRequestArguments): void {
+        args: DebugProtocol.InitializeRequestArguments): void {
         response.body = response.body || {};
         response.body.supportsConfigurationDoneRequest = true;
         response.body.supportsSetVariable = true;
@@ -78,7 +104,7 @@ export class GDBDebugSession extends LoggingDebugSession {
 
     protected async attachRequest(response: DebugProtocol.AttachResponse, args: AttachRequestArguments): Promise<void> {
         try {
-            logger.setup(args.verbose ? Logger.LogLevel.Verbose : Logger.LogLevel.Warn, false);
+            this.setupLogging(args);
 
             this.isAttach = true;
 
@@ -102,7 +128,8 @@ export class GDBDebugSession extends LoggingDebugSession {
 
     protected async launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments): Promise<void> {
         try {
-            logger.setup(args.verbose ? Logger.LogLevel.Verbose : Logger.LogLevel.Warn, false);
+            this.setupLogging(args);
+
             this.gdb.on('consoleStreamOutput', (output, category) => {
                 this.sendEvent(new OutputEvent(output, category));
             });
@@ -125,7 +152,7 @@ export class GDBDebugSession extends LoggingDebugSession {
     }
 
     protected async setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse,
-                                          args: DebugProtocol.SetBreakpointsArguments): Promise<void> {
+        args: DebugProtocol.SetBreakpointsArguments): Promise<void> {
         try {
             // Need to get the list of current breakpoints in the file and then make sure
             // that we end up with the requested set of breakpoints for that file
@@ -186,7 +213,7 @@ export class GDBDebugSession extends LoggingDebugSession {
     }
 
     protected async configurationDoneRequest(response: DebugProtocol.ConfigurationDoneResponse,
-                                             args: DebugProtocol.ConfigurationDoneArguments): Promise<void> {
+        args: DebugProtocol.ConfigurationDoneArguments): Promise<void> {
         try {
             if (this.isAttach) {
                 await exec.sendExecContinue(this.gdb);
@@ -225,7 +252,7 @@ export class GDBDebugSession extends LoggingDebugSession {
     }
 
     protected async stackTraceRequest(response: DebugProtocol.StackTraceResponse,
-                                      args: DebugProtocol.StackTraceArguments): Promise<void> {
+        args: DebugProtocol.StackTraceArguments): Promise<void> {
         try {
             const depthResult = await sendStackInfoDepth(this.gdb, { maxDepth: 100 });
             const depth = parseInt(depthResult.depth, 10);
@@ -262,7 +289,7 @@ export class GDBDebugSession extends LoggingDebugSession {
     }
 
     protected async nextRequest(response: DebugProtocol.NextResponse,
-                                args: DebugProtocol.NextArguments): Promise<void> {
+        args: DebugProtocol.NextArguments): Promise<void> {
         try {
             await exec.sendExecNext(this.gdb);
             this.sendResponse(response);
@@ -272,7 +299,7 @@ export class GDBDebugSession extends LoggingDebugSession {
     }
 
     protected async stepInRequest(response: DebugProtocol.StepInResponse,
-                                  args: DebugProtocol.StepInArguments): Promise<void> {
+        args: DebugProtocol.StepInArguments): Promise<void> {
         try {
             await exec.sendExecStep(this.gdb);
             this.sendResponse(response);
@@ -282,7 +309,7 @@ export class GDBDebugSession extends LoggingDebugSession {
     }
 
     protected async stepOutRequest(response: DebugProtocol.StepOutResponse,
-                                   args: DebugProtocol.StepOutArguments): Promise<void> {
+        args: DebugProtocol.StepOutArguments): Promise<void> {
         try {
             await exec.sendExecFinish(this.gdb);
             this.sendResponse(response);
@@ -292,7 +319,7 @@ export class GDBDebugSession extends LoggingDebugSession {
     }
 
     protected async continueRequest(response: DebugProtocol.ContinueResponse,
-                                    args: DebugProtocol.ContinueArguments): Promise<void> {
+        args: DebugProtocol.ContinueArguments): Promise<void> {
         try {
             await exec.sendExecContinue(this.gdb);
             this.sendResponse(response);
@@ -302,7 +329,7 @@ export class GDBDebugSession extends LoggingDebugSession {
     }
 
     protected scopesRequest(response: DebugProtocol.ScopesResponse,
-                            args: DebugProtocol.ScopesArguments): void {
+        args: DebugProtocol.ScopesArguments): void {
         const frame: FrameVariableReference = {
             type: 'frame',
             frameHandle: args.frameId,
@@ -318,7 +345,7 @@ export class GDBDebugSession extends LoggingDebugSession {
     }
 
     protected async variablesRequest(response: DebugProtocol.VariablesResponse,
-                                     args: DebugProtocol.VariablesArguments): Promise<void> {
+        args: DebugProtocol.VariablesArguments): Promise<void> {
         const variables = new Array<DebugProtocol.Variable>();
         response.body = {
             variables,
@@ -475,7 +502,7 @@ export class GDBDebugSession extends LoggingDebugSession {
     }
 
     protected async setVariableRequest(response: DebugProtocol.SetVariableResponse,
-                                       args: DebugProtocol.SetVariableArguments): Promise<void> {
+        args: DebugProtocol.SetVariableArguments): Promise<void> {
         try {
             const ref = this.variableHandles.get(args.variablesReference);
             if (!ref) {
@@ -522,7 +549,7 @@ export class GDBDebugSession extends LoggingDebugSession {
     // }
 
     protected async evaluateRequest(response: DebugProtocol.EvaluateResponse,
-                                    args: DebugProtocol.EvaluateArguments): Promise<void> {
+        args: DebugProtocol.EvaluateArguments): Promise<void> {
         response.body = { result: 'Error: could not evaluate expression', variablesReference: 0 }; // default response
         try {
             switch (args.context) {
@@ -595,7 +622,7 @@ export class GDBDebugSession extends LoggingDebugSession {
     }
 
     protected async disconnectRequest(response: DebugProtocol.DisconnectResponse,
-                                      args: DebugProtocol.DisconnectArguments): Promise<void> {
+        args: DebugProtocol.DisconnectArguments): Promise<void> {
         try {
             await this.gdb.sendGDBExit();
             this.sendResponse(response);
@@ -624,7 +651,7 @@ export class GDBDebugSession extends LoggingDebugSession {
                 this.sendStoppedEvent('step', parseInt(result['thread-id'], 10));
                 break;
             default:
-                logger.warn('GDB unhandled stop: ' + JSON.stringify(result));
+                logger.warn('GDB unhandled stop', result);
         }
     }
 
@@ -637,7 +664,7 @@ export class GDBDebugSession extends LoggingDebugSession {
                 this.handleGDBStopped(result);
                 break;
             default:
-                logger.warn('GDB unhandled async: ' + JSON.stringify(result));
+                logger.warn('GDB unhandled async', result);
         }
     }
 }

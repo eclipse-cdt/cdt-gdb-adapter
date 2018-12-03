@@ -8,8 +8,8 @@
  * SPDX-License-Identifier: EPL-2.0
  *********************************************************************/
 import { Readable } from 'stream';
-import { logger } from 'vscode-debugadapter/lib/logger';
 import { GDBBackend } from './GDBBackend';
+import { logger } from './logging';
 
 export class MIParser {
     private line = '';
@@ -213,7 +213,7 @@ export class MIParser {
     private handleLogStream() {
         const msg = this.handleCString();
         if (msg) {
-            logger.log(msg);
+            logger.info(msg);
         }
     }
 
@@ -232,14 +232,14 @@ export class MIParser {
 
         switch (c) {
             case '^':
-                logger.verbose('GDB result: ' + this.restOfLine());
+                logger.debug('GDB result', this.restOfLine());
                 const command = this.commandQueue[token];
                 if (command) {
                     const asyncResult = this.handleAsyncOutput();
                     command(asyncResult);
                     delete this.commandQueue[token];
                 } else {
-                    logger.error('GDB response with no command: ' + token);
+                    logger.error('GDB response with no command', token);
                 }
                 break;
             case '~':
@@ -251,10 +251,10 @@ export class MIParser {
                 break;
             case '=':
                 // TODO: notify
-                logger.verbose('GDB notify: ' + this.restOfLine());
+                logger.debug('GDB notify', this.restOfLine());
                 break;
             case '*':
-                logger.verbose('GDB async: ' + this.restOfLine());
+                logger.debug('GDB async', this.restOfLine());
                 const result = this.handleAsyncOutput();
                 this.gdb.emit('async', result);
                 break;
