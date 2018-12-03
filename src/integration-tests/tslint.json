@@ -1,0 +1,6 @@
+// Allow non-arrow functions: https://mochajs.org/#arrow-functions
+{
+  "rules": {
+    "only-arrow-functions": false
+  }
+}

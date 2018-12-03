@@ -1,4 +1,4 @@
-BINS = empty
+BINS = empty sleep
 
 .PHONY: all
 all: $(BINS)
@@ -7,6 +7,9 @@ CC = gcc
 LINK = $(CC) -o $@ $^
 
 empty: empty.o
+	$(LINK)
+
+sleep: sleep.o
 	$(LINK)
 
 %.o: %.c
