@@ -143,6 +143,7 @@ export class GDBDebugSession extends LoggingDebugSession {
         response.body.supportsFunctionBreakpoints = true;
         // response.body.supportsSetExpression = true;
         response.body.supportsDisassembleRequest = true;
+        response.body.supportsReadMemoryRequest = true;
         this.sendResponse(response);
     }
 
@@ -931,6 +932,21 @@ export class GDBDebugSession extends LoggingDebugSession {
             }
 
             response.body = { instructions };
+            this.sendResponse(response);
+        } catch (err) {
+            this.sendErrorResponse(response, 1, err.message);
+        }
+    }
+
+    protected async readMemoryRequest(response: DebugProtocol.ReadMemoryResponse,
+        args: DebugProtocol.ReadMemoryArguments): Promise<void> {
+        try {
+            const result = await sendDataReadMemoryBytes(
+                this.gdb, args.memoryReference, args.count, args.offset);
+            response.body = {
+                data: result.memory[0].contents,
+                address: result.memory[0].begin,
+            };
             this.sendResponse(response);
         } catch (err) {
             this.sendErrorResponse(response, 1, err.message);
